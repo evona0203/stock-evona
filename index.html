@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1e3a8a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Evona Stock</title>
+<link rel="manifest" href="manifest.json">
+<meta name="application-name" content="Evona Stock">
+<meta name="apple-mobile-web-app-title" content="Evona Stock">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --blue: #1e3a8a; --blue-light: #eff6ff; --blue-border: #bfdbfe;
+  --green: #059669; --green-light: #d1fae5;
+  --red: #dc2626; --red-light: #fee2e2;
+  --gray: #6b7280; --gray-light: #f3f4f6; --gray-border: #e5e7eb;
+  --text: #111827; --text-muted: #6b7280; --bg: #f1f5f9; --white: #ffffff;
+  --radius: 10px;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--text); padding-bottom: 2rem; }
+
+.app-header { background: var(--blue); color: white; padding: 12px 20px; display: flex; align-items: center; gap: 15px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.app-header img { height: 45px; background: white; padding: 4px; border-radius: 5px; }
+.app-header h1 { font-size: 16px; font-weight: 600; }
+
+.container { max-width: 520px; margin: 0 auto; padding: 16px; }
+
+.card { background: var(--white); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+.card-title { font-size: 11px; font-weight: 700; color: var(--blue); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; border-bottom: 1px solid var(--blue-light); padding-bottom: 5px; }
+
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.field label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.field input { padding: 10px; border: 1px solid var(--gray-border); border-radius: 6px; font-size: 14px; outline: none; }
+
+.btn-main { padding: 15px; border-radius: 10px; border: none; font-weight: 700; font-size: 15px; cursor: pointer; }
+.btn-blue { background: var(--blue); color: white; }
+.btn-outline { background: white; border: 1px solid var(--blue); color: var(--blue); }
+</style>
+</head>
+<body>
+
+<div id="installBanner" style="display:none; background:#0fb4dc; color:white; padding:10px 16px; align-items:center; justify-content:space-between; gap:10px; font-size:13px; font-weight:600;">
+  <span>📲 Installer l'application sur votre écran</span>
+  <div style="display:flex; gap:8px;">
+    <button onclick="installApp()" style="background:white; color:#0b6a8a; border:none; border-radius:6px; padding:6px 12px; font-weight:700; font-size:12px; cursor:pointer;">Installer</button>
+    <button onclick="document.getElementById('installBanner').style.display='none'" style="background:rgba(255,255,255,0.2); color:white; border:none; border-radius:6px; padding:6px 10px; font-size:12px; cursor:pointer;">✕</button>
+  </div>
+</div>
+<div id="updateBanner" style="display:none; background:#059669; color:white; padding:10px 16px; align-items:center; justify-content:space-between; gap:10px; font-size:13px; font-weight:600;">
+  <span>🔄 Nouvelle version disponible !</span>
+  <button onclick="applyUpdate()" style="background:white; color:#059669; border:none; border-radius:6px; padding:6px 12px; font-weight:700; font-size:12px; cursor:pointer;">Mettre à jour</button>
+</div>
+<div class="app-header">
+  <img src="logo.png" alt="Evona Logo">
+  <h1>Stock</h1>
+</div>
+
+<div class="container">
+  <div class="card" id="stockPinCard">
+    <div class="card-title">🔒 Accès stock</div>
+    <div class="field">
+      <label>Code PIN</label>
+      <input type="password" inputmode="numeric" id="stockPinInput" placeholder="Code à 4 chiffres" onkeydown="if(event.key==='Enter') unlockStock()">
+    </div>
+    <button class="btn-main btn-blue" style="width:100%" onclick="unlockStock()">Déverrouiller</button>
+    <p id="stockPinError" style="color:#dc2626;font-size:12px;margin-top:8px;display:none;"></p>
+  </div>
+
+  <div id="stockPanel" style="display:none;">
+    <div class="card">
+      <div class="card-title">🔍 Rechercher un produit</div>
+      <div class="field">
+        <label>Référence ou nom du produit</label>
+        <input type="text" id="stockQuery" placeholder="Ex: VHF231256 ou filtre" onkeydown="if(event.key==='Enter') searchStock()">
+      </div>
+      <button class="btn-main btn-blue" style="width:100%" onclick="searchStock()">Rechercher</button>
+    </div>
+    <div id="stockResults"></div>
+  </div>
+</div>
+
+<script>
+// Proxy sécurisé vers Dolibarr, déployé sur le VPS IONOS (même proxy que l'app Rapports)
+const PROXY_CONFIG = {
+  url: "https://erp.evonaservice.fr/evona-proxy/dolibarr-proxy.php",
+  token: "56d27e04b4e84023e0706af26b975499da22600a95ff258c811785bab3589d17"
+};
+
+let stockPin = sessionStorage.getItem('evona_stock_pin') || '';
+
+async function callStockProxy(action, payload) {
+  const res = await fetch(PROXY_CONFIG.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-App-Token': PROXY_CONFIG.token,
+      'X-Stock-Pin': stockPin
+    },
+    body: JSON.stringify({ action, ...payload })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 403) {
+    stockPin = '';
+    sessionStorage.removeItem('evona_stock_pin');
+    showStockLock(data.message || 'Code PIN invalide');
+    throw new Error('PIN_INVALID');
+  }
+  if (!res.ok || data.error) throw new Error(data.message || `HTTP ${res.status}`);
+  return data;
+}
+
+function showStockLock(errorMsg) {
+  document.getElementById('stockPanel').style.display = 'none';
+  document.getElementById('stockPinCard').style.display = 'block';
+  const errEl = document.getElementById('stockPinError');
+  if (errorMsg) { errEl.textContent = '⚠️ ' + errorMsg; errEl.style.display = 'block'; }
+  else { errEl.style.display = 'none'; }
+}
+
+function unlockStock() {
+  const val = document.getElementById('stockPinInput').value.trim();
+  if (!val) return;
+  stockPin = val;
+  sessionStorage.setItem('evona_stock_pin', val);
+  document.getElementById('stockPinCard').style.display = 'none';
+  document.getElementById('stockPanel').style.display = 'block';
+  document.getElementById('stockPinError').style.display = 'none';
+}
+
+async function searchStock() {
+  const query = document.getElementById('stockQuery').value.trim();
+  const resultsEl = document.getElementById('stockResults');
+  if (!query) return;
+  resultsEl.innerHTML = '<p style="color:#999;font-size:13px;text-align:center;padding:16px">Recherche...</p>';
+  try {
+    const data = await callStockProxy('search', { query });
+    renderStockResults(data.products || []);
+  } catch (e) {
+    if (e.message !== 'PIN_INVALID') {
+      resultsEl.innerHTML = `<p style="color:#dc2626;font-size:13px;text-align:center;padding:16px">${e.message}</p>`;
+    } else {
+      resultsEl.innerHTML = '';
+    }
+  }
+}
+
+function renderStockResults(products) {
+  const resultsEl = document.getElementById('stockResults');
+  if (products.length === 0) {
+    resultsEl.innerHTML = '<p style="color:#999;font-size:13px;text-align:center;padding:16px">Aucun produit trouvé.</p>';
+    return;
+  }
+  resultsEl.innerHTML = products.map((p, idx) => `
+    <div class="card" id="stockRow-${idx}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div>
+          <div style="font-weight:700;font-size:13px;">${p.ref}</div>
+          <div style="font-size:12px;color:var(--text-muted);">${p.label || ''}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:11px;color:var(--text-muted);">Stock</div>
+          <div id="stockQty-${idx}" style="font-weight:700;font-size:18px;color:var(--blue);">${p.stock_reel ?? '?'}</div>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:8px;">
+        <label>Motif (obligatoire)</label>
+        <input type="text" id="stockReason-${idx}" placeholder="Ex: correction erreur rapport EVN-..., pièce hors révision">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="number" id="stockAdjQty-${idx}" min="1" step="1" value="1" style="width:70px;padding:8px;border:1px solid var(--gray-border);border-radius:6px;">
+        <button class="btn-main btn-outline" style="flex:1;padding:10px;" onclick="adjustStock(${idx}, '${p.ref}', -1)">− Retirer</button>
+        <button class="btn-main btn-blue" style="flex:1;padding:10px;" onclick="adjustStock(${idx}, '${p.ref}', 1)">+ Ajouter</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function adjustStock(idx, ref, sign) {
+  const qtyInput = document.getElementById(`stockAdjQty-${idx}`);
+  const reasonInput = document.getElementById(`stockReason-${idx}`);
+  const qty = parseInt(qtyInput.value, 10) || 0;
+  const reason = reasonInput.value.trim();
+  if (qty <= 0) { alert('Quantité invalide.'); return; }
+  if (!reason) { alert('Le motif est obligatoire.'); return; }
+  try {
+    await callStockProxy('adjust', { ref, qty: sign * qty, reason });
+    const qtyEl = document.getElementById(`stockQty-${idx}`);
+    const current = parseFloat(qtyEl.textContent);
+    if (!isNaN(current)) qtyEl.textContent = current + sign * qty;
+    reasonInput.value = '';
+    alert(`✅ Stock ${sign > 0 ? 'augmenté' : 'diminué'} de ${qty} pour ${ref}.`);
+  } catch (e) {
+    if (e.message !== 'PIN_INVALID') alert('⚠️ Erreur : ' + e.message);
+  }
+}
+
+if (stockPin) {
+  document.getElementById('stockPinCard').style.display = 'none';
+  document.getElementById('stockPanel').style.display = 'block';
+}
+
+// ── PWA Install ──
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('installBanner').style.display = 'flex';
+});
+function installApp() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(() => {
+    deferredPrompt = null;
+    document.getElementById('installBanner').style.display = 'none';
+  });
+}
+function applyUpdate() {
+  const banner = document.getElementById('updateBanner');
+  const worker = banner._newWorker;
+  if (worker) worker.postMessage('SKIP_WAITING');
+  banner.style.display = 'none';
+}
+window.addEventListener('appinstalled', () => {
+  document.getElementById('installBanner').style.display = 'none';
+});
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('sw.js');
+      console.log('[App] SW enregistré:', reg.scope);
+
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            document.getElementById('updateBanner').style.display = 'flex';
+            document.getElementById('updateBanner')._newWorker = newWorker;
+          }
+        });
+      });
+
+      reg.update();
+    } catch(err) {
+      console.log('[App] SW erreur:', err);
+    }
+  });
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload();
+  });
+}
+</script>
+</body>
+</html>
